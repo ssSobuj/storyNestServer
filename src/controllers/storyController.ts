@@ -21,9 +21,30 @@ export const getStories = async (
 ): Promise<void> => {
   try {
     // 1. Build the filter object
-    const filter: { [key: string]: any } = { status: StoryStatus.APPROVED };
+    const filter: { [key: string]: any } = {};
+
+    if (req.user?.role !== "admin") {
+      filter.status = StoryStatus.APPROVED;
+    }
+    // ==> NEW: Add search functionality
+    if (
+      typeof req.query.search === "string" &&
+      req.query.search.trim() !== ""
+    ) {
+      const regex = new RegExp(req.query.search, "i"); // 'i' for case-insensitive
+      filter.$or = [
+        // Search in title or content
+        { title: regex },
+        { content: regex },
+        // If you want to search by author name, you'd need a more complex aggregation pipeline
+      ];
+    }
     const queryObj = { ...req.query };
-    const excludedFields = ["page", "sort", "limit", "fields"];
+    if (req.user?.role === "admin" && queryObj.status) {
+      filter.status = queryObj.status; // Allow admin to filter by any status
+    }
+
+    const excludedFields = ["page", "sort", "limit", "fields", "search"];
     excludedFields.forEach((el) => delete queryObj[el]);
 
     let queryStr = JSON.stringify(queryObj);
@@ -141,6 +162,15 @@ export const createStory = async (
       return;
     }
     const storyData = { ...req.body, author: req.user.id };
+
+    if (req.body.tags) {
+      try {
+        storyData.tags = JSON.parse(req.body.tags);
+      } catch (e) {
+        storyData.tags = []; // Default to empty array if parsing fails
+      }
+    }
+
     if (req.file) {
       storyData.coverImage = req.file.path;
       storyData.coverImagePublicId = req.file.filename;
