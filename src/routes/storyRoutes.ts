@@ -26,7 +26,7 @@ router
   .route("/")
   .post(
     protect,
-    authorize("user"),
+    authorize("user", "admin"),
     upload.single("coverImage"),
     [
       check("title", "Title is required").not().isEmpty(),
