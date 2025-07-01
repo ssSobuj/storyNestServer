@@ -1,4 +1,7 @@
-import { Schema, model, Document, Types } from "mongoose";
+import { Schema, model, Document, Types, Model } from "mongoose";
+import { IComment } from "./Comment"; // Make sure the path is correct
+import Comment from "./Comment";
+
 export enum StoryStatus {
   PENDING = "pending",
   APPROVED = "approved",
@@ -8,6 +11,7 @@ export enum StoryStatus {
 export interface IStory extends Document {
   title: string;
   content: string;
+  slug: string;
   author: Types.ObjectId;
   category: string;
   tags: string[];
@@ -19,15 +23,26 @@ export interface IStory extends Document {
   views: number;
   createdAt: Date;
   updatedAt: Date;
+  comments: IComment[];
 }
 
-const StorySchema = new Schema<IStory>(
+interface StoryModel extends Model<IStory> {
+  recalculateAvgRating(storyId: string): Promise<void>;
+}
+
+const StorySchema = new Schema<IStory, StoryModel>(
   {
     title: {
       type: String,
       required: [true, "Please add a title"],
       trim: true,
       maxlength: [100, "Title cannot be more than 100 characters"],
+    },
+    slug: {
+      type: String,
+      required: true,
+      unique: true, // Ensures no two stories can have the same slug
+      lowercase: true,
     },
     content: {
       type: String,
@@ -109,5 +124,35 @@ StorySchema.pre("deleteOne", { document: true }, async function (next) {
   // await this.model("Comment").deleteMany({ story: this._id });
   next();
 });
+
+StorySchema.statics.recalculateAvgRating = async function (storyId: string) {
+  try {
+    // FIX: Instead of `this.model("Comment")`, we use the imported `Comment` model directly.
+    // This is cleaner and avoids any ambiguity with `this`.
+    const stats = await Comment.aggregate([
+      {
+        // Use `new Types.ObjectId(storyId)` to ensure it's a valid ObjectId for matching
+        $match: { story: new Types.ObjectId(storyId) },
+      },
+      {
+        $group: {
+          _id: "$story",
+          avgRating: { $avg: "$rating" },
+        },
+      },
+    ]);
+
+    // `this` here refers to the StoryModel, so `this.findByIdAndUpdate` is correct.
+    if (stats.length > 0) {
+      await this.findByIdAndUpdate(storyId, {
+        avgRating: parseFloat(stats[0].avgRating.toFixed(1)),
+      });
+    } else {
+      await this.findByIdAndUpdate(storyId, { avgRating: 0 });
+    }
+  } catch (err) {
+    console.error("Error recalculating average rating:", err);
+  }
+};
 
 export default model<IStory>("Story", StorySchema);

@@ -1,9 +1,10 @@
-// src/controllers/storyController.ts
-
 import { Request, Response, NextFunction } from "express";
 import Story, { StoryStatus } from "../models/Story";
 import { validationResult } from "express-validator";
 import { cloudinary } from "../middleware/upload";
+import slugify from "slugify";
+import crypto from "crypto";
+import "../models/Comment";
 
 // Define the interface for requests that have a user and potentially a file
 interface AuthRequest extends Request {
@@ -111,7 +112,7 @@ export const getMyStories = async (
   }
 };
 
-// @desc    Get single story
+// @desc    Get single story by its ID
 // @route   GET /api/v1/stories/:id
 // @access  Public
 export const getStory = async (
@@ -125,8 +126,6 @@ export const getStory = async (
       .populate({ path: "author", select: "username" })
       .populate("comments");
 
-    // A user can see their own pending/rejected stories, or admins can see any story.
-    // Public can only see approved stories.
     const canView =
       story &&
       (story.status === StoryStatus.APPROVED ||
@@ -138,8 +137,45 @@ export const getStory = async (
       return;
     }
 
-    // This is a non-blocking operation, no need to await it if you don't need the result immediately
     Story.updateOne({ _id: storyId }, { $inc: { views: 1 } }).exec();
+
+    res.status(200).json({ success: true, data: story });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ==> THE FIX: THIS IS THE NEW, ENHANCED FUNCTION <==
+// @desc    Get single story by its SLUG
+// @route   GET /api/v1/stories/slug/:slug
+// @access  Public
+export const getStoryBySlug = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { slug } = req.params;
+
+    // Find the story by its unique slug
+    const story = await Story.findOne({ slug: slug })
+      .populate({ path: "author", select: "username" })
+      .populate("comments"); // Also populate comments for consistency
+
+    // Check if the story exists and if the user has permission to view it
+    const canView =
+      story &&
+      (story.status === StoryStatus.APPROVED ||
+        (req.user && story.author.toString() === req.user.id) ||
+        (req.user && req.user.role === "admin"));
+
+    if (!canView) {
+      res.status(404).json({ success: false, message: "Story not found" });
+      return;
+    }
+
+    // Increment the view count (using the story's _id)
+    Story.updateOne({ _id: story._id }, { $inc: { views: 1 } }).exec();
 
     res.status(200).json({ success: true, data: story });
   } catch (err) {
@@ -161,13 +197,28 @@ export const createStory = async (
       res.status(400).json({ errors: errors.array() });
       return;
     }
-    const storyData = { ...req.body, author: req.user.id };
+    const { title } = req.body;
+
+    let slug = slugify(title, {
+      lower: true,
+      strict: true,
+      trim: true,
+    });
+
+    const existingStory = await Story.findOne({ slug: slug });
+
+    if (existingStory) {
+      const randomSuffix = crypto.randomBytes(4).toString("hex");
+      slug = `${slug}-${randomSuffix}`;
+    }
+
+    const storyData = { ...req.body, author: req.user.id, slug: slug };
 
     if (req.body.tags) {
       try {
         storyData.tags = JSON.parse(req.body.tags);
       } catch (e) {
-        storyData.tags = []; // Default to empty array if parsing fails
+        storyData.tags = [];
       }
     }
 
@@ -201,6 +252,10 @@ export const updateStory = async (
       return;
     }
     const updateData = { ...req.body, status: StoryStatus.PENDING };
+
+    // ==> THE FIX: Prevent the slug from being changed on update <==
+    delete updateData.slug;
+
     if (req.file) {
       if (story.coverImagePublicId) {
         await cloudinary.uploader.destroy(story.coverImagePublicId);

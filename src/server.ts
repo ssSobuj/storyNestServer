@@ -12,6 +12,7 @@ import connectDB from "./config/db";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes";
 import storyRoutes from "./routes/storyRoutes";
+import commentRoutes from "./routes/commentRoutes"; // ==> IMPORT
 
 const app = express();
 // ==> A small but important change: Use process.env here <==
@@ -21,7 +22,7 @@ const PORT = process.env.PORT || 5000;
 
 // 1. CORS Middleware
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: ["http://localhost:3000", "https://story-nest-topaz.vercel.app"],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
@@ -39,6 +40,7 @@ app.get("/api", (req, res) => {
 app.use("/api/v1/auth", authRoutes);
 // ==> A small typo fix: should probably be '/stories' to match REST conventions
 app.use("/api/v1/stories", storyRoutes);
+app.use("/api/v1/stories/:storyId/comments", commentRoutes);
 
 // --- SERVER STARTUP LOGIC ---
 
