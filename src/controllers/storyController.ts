@@ -201,10 +201,12 @@ export const createStory = async (
 
     let slug = slugify(title, {
       lower: true,
-      strict: true,
       trim: true,
+      remove: /[*+~.()'"!:@–]/g,
     });
-
+    if (!slug) {
+      slug = crypto.randomBytes(6).toString("hex");
+    }
     const existingStory = await Story.findOne({ slug: slug });
 
     if (existingStory) {
