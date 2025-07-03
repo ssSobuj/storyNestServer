@@ -8,6 +8,7 @@ export interface IUser extends Document {
   username: string;
   email: string;
   password?: string;
+  refreshToken?: string;
   googleId?: string;
   role: "user" | "admin";
   isVerified: boolean;
@@ -17,6 +18,7 @@ export interface IUser extends Document {
   verificationTokenExpire?: Date;
   matchPassword: (enteredPassword: string) => Promise<boolean>;
   getSignedToken: () => string;
+  getRefreshToken: () => Promise<string>;
   getResetPasswordToken: () => string;
   getVerificationToken: () => string;
 }
@@ -53,6 +55,10 @@ const UserSchema = new Schema<IUser>(
     isVerified: {
       type: Boolean,
       default: false,
+    },
+    refreshToken: {
+      type: String,
+      select: false,
     },
     verificationToken: String,
     verificationTokenExpire: Date,
@@ -101,6 +107,19 @@ UserSchema.methods.matchPassword = async function (
 // Sign JWT and return
 UserSchema.methods.getSignedToken = function (): string {
   return signToken({ id: this._id, role: this.role });
+};
+
+// Generate, hash, and save refresh token
+UserSchema.methods.getRefreshToken = async function (): Promise<string> {
+  const refreshToken = crypto.randomBytes(32).toString("hex");
+
+  // Hash the token before saving
+  this.refreshToken = await bcrypt.hash(refreshToken, 10);
+
+  // We don't need to call save() here, it will be called in the controller
+  // that uses this method (e.g., login).
+
+  return refreshToken; // Return the unhashed token to the user
 };
 
 // ==> ADD THIS NEW METHOD FOR EMAIL VERIFICATION <==

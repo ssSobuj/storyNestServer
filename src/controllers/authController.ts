@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import User from "../models/User";
-import { signToken, JWT_COOKIE_EXPIRE } from "../config/jwt";
+import User, { IUser } from "../models/User";
+import { JWT_COOKIE_EXPIRE } from "../config/jwt";
+import bcrypt from "bcryptjs";
 import logger from "../utils/logger";
 import sendEmail from "../utils/sendEmail";
 import crypto from "crypto";
@@ -124,18 +125,24 @@ export const login = async (
       return;
     }
 
-    const token = user.getSignedToken();
+    const accessToken = user.getSignedToken();
+    const refreshToken = await user.getRefreshToken(); // Generate the unhashed token
+    await user.save(); // Save the hashed version to the database
 
-    const options = {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
+    // Send the refresh token in a secure, httpOnly cookie
+    const refreshOptions = {
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
+      sameSite: "strict" as "strict",
     };
 
-    res
-      .status(200)
-      .cookie("token", token, options)
-      .json({ success: true, token });
+    res.cookie("refreshToken", refreshToken, refreshOptions);
+
+    res.status(200).json({
+      success: true,
+      token: accessToken, // This is the short-lived access token
+    });
   } catch (err) {
     next(err);
   }
@@ -198,6 +205,63 @@ export const googleLogin = async (
       .status(200)
       .cookie("token", appToken, options)
       .json({ success: true, token: appToken });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Refresh access token
+// @route   POST /api/v1/auth/refresh
+// @access  Public (but needs a valid refresh token cookie)
+export const refreshToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const tokenFromCookie = req.cookies.refreshToken;
+
+    if (!tokenFromCookie) {
+      res
+        .status(401)
+        .json({ success: false, error: "Not authorized, no token" });
+      return;
+    }
+
+    // IMPORTANT: The logic I gave you before had a performance issue.
+    // This is still not ideal for millions of users, but it's much better than before.
+    // It now only queries users who might have a refresh token.
+    const usersWithToken = await User.find({
+      refreshToken: { $exists: true },
+    }).select("+refreshToken");
+
+    let foundUser: IUser | null = null;
+    for (const user of usersWithToken) {
+      // Ensure the user has a refreshToken property before comparing
+      if (
+        user.refreshToken &&
+        (await bcrypt.compare(tokenFromCookie, user.refreshToken))
+      ) {
+        foundUser = user;
+        break;
+      }
+    }
+
+    if (!foundUser) {
+      res.clearCookie("refreshToken"); // Clear the invalid token
+      res
+        .status(403)
+        .json({ success: false, error: "Forbidden, invalid refresh token" });
+      return;
+    }
+
+    // Token is valid, issue a new short-lived access token
+    const newAccessToken = foundUser.getSignedToken();
+
+    res.status(200).json({
+      success: true,
+      token: newAccessToken,
+    });
   } catch (err) {
     next(err);
   }

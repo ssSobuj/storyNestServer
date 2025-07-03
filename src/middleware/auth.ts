@@ -1,9 +1,10 @@
-import { Request, Response, NextFunction, RequestHandler } from "express";
-import jwt from "jsonwebtoken";
+// middleware/auth.ts
+// You can replace your entire file with this code.
+
+import { Request, Response, NextFunction } from "express";
 import User from "../models/User";
 import logger from "../utils/logger";
 import { verifyToken } from "../config/jwt";
-import { ParamsDictionary } from "express-serve-static-core";
 
 interface AuthRequest extends Request {
   user?: any;
@@ -15,60 +16,66 @@ export const protect = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  // Explicitly declare return type as Promise<void>
+  let token;
+
+  // 1. Get token from header or cookies
+  if (req.headers.authorization?.startsWith("Bearer")) {
+    token = req.headers.authorization.split(" ")[1];
+  } else if (req.cookies.token) {
+    // This is less common if storing token in localStorage on front-end,
+    // but good for flexibility.
+    token = req.cookies.token;
+  }
+
+  // 2. Make sure token exists
+  if (!token) {
+    res.status(401).json({
+      success: false,
+      error: "Not authorized, no token provided.",
+    });
+    return;
+  }
+
   try {
-    let token;
+    // 3. Verify token and find the user
+    // The verifyToken function will throw an error if the token is invalid or expired.
+    const decoded: any = verifyToken(token);
 
-    if (req.headers.authorization?.startsWith("Bearer")) {
-      token = req.headers.authorization.split(" ")[1];
-    } else if (req.cookies.token) {
-      token = req.cookies.token;
+    // Attach user to the request object
+    req.user = await User.findById(decoded.id);
+
+    // Check if user still exists in the database
+    if (!req.user) {
+      res.status(401).json({ success: false, error: "User not found." });
+      return;
     }
 
-    if (!token) {
-      res.status(401).json({
-        success: false,
-        error: "Not authorized to access this route",
-      });
-      return; // Just return without value
+    // If everything is okay, proceed to the next middleware/controller
+    next();
+  } catch (err: any) {
+    // 4. Handle token verification errors
+    let errorMessage = "Not authorized, token failed.";
+
+    // Handle different errors appropriately.
+    if (err.name === "TokenExpiredError") {
+      // This is an expected event. Log it as 'info', not 'error'.
+      logger.info("Token expired. This is expected. Client should refresh.");
+      errorMessage = "Token expired.";
+    } else if (err.name === "JsonWebTokenError") {
+      // This could be a malformed token, which is more serious. Log as 'warn'.
+      logger.warn(`Invalid token received: ${err.message}`);
+      errorMessage = "Invalid token.";
+    } else {
+      // For any other unexpected errors, log it as a real error.
+      logger.error("Unexpected token verification error:", err);
     }
 
-    try {
-      const decoded: any = verifyToken(token);
-      if (decoded.exp && decoded.exp < Date.now() / 1000) {
-        res.status(401).json({
-          success: false,
-          error: "Token expired, please login again",
-        });
-        return;
-      }
-
-      req.user = await User.findById(decoded.id);
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          error: "User not found",
-        });
-        return;
-      }
-
-      next();
-    } catch (err: any) {
-      let errorMessage = "Not authorized to access this route";
-      if (err.name === "TokenExpiredError") {
-        errorMessage = "Token expired, please login again";
-      } else if (err.name === "JsonWebTokenError") {
-        errorMessage = "Invalid token";
-      }
-
-      logger.error("Token verification error:", err);
-      res.status(401).json({
-        success: false,
-        error: errorMessage,
-      });
-    }
-  } catch (err) {
-    next(err); // Pass errors to Express error handler
+    // Always respond with 401 Unauthorized for any token failure.
+    // This is what the frontend interceptor is listening for.
+    res.status(401).json({
+      success: false,
+      error: errorMessage,
+    });
   }
 };
 
