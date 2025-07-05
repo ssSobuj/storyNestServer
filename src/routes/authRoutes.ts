@@ -8,6 +8,7 @@ import {
   verifyEmail,
   googleLogin,
   refreshToken,
+  logout,
 } from "../controllers/authController";
 import { protect } from "../middleware/auth";
 import { check } from "express-validator";
@@ -42,5 +43,6 @@ router.get("/me", protect, getMe);
 router.post("/forgotpassword", forgotPassword);
 router.put("/resetpassword/:resettoken", resetPassword);
 router.post("/refresh", refreshToken); // <-- ADD THIS
+router.post("/logout", logout);
 
 export default router;

@@ -13,6 +13,39 @@ interface AuthRequest extends Request {
   user?: any;
 }
 
+const sendTokenResponse = async (
+  user: IUser,
+  statusCode: number,
+  res: Response
+) => {
+  // 1. Create access token
+  const accessToken = user.getSignedToken();
+
+  // 2. Create refresh token, save it to the user in DB
+  const refreshToken = await user.getRefreshToken();
+  await user.save({ validateBeforeSave: false });
+
+  // 3. Create secure cookie options
+  const refreshOptions = {
+    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite:
+      process.env.NODE_ENV === "production"
+        ? "none"
+        : ("lax" as "lax" | "none"),
+  };
+
+  // 4. Set the refresh token in the cookie and send the access token in the response
+  res
+    .status(statusCode)
+    .cookie("refreshToken", refreshToken, refreshOptions)
+    .json({
+      success: true,
+      token: accessToken,
+    });
+};
+
 // @desc    Register user
 // @route   POST /api/v1/auth/register
 // @access  Public
@@ -124,25 +157,7 @@ export const login = async (
       });
       return;
     }
-
-    const accessToken = user.getSignedToken();
-    const refreshToken = await user.getRefreshToken(); // Generate the unhashed token
-    await user.save(); // Save the hashed version to the database
-
-    // Send the refresh token in a secure, httpOnly cookie
-    const refreshOptions = {
-      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict" as "strict",
-    };
-
-    res.cookie("refreshToken", refreshToken, refreshOptions);
-
-    res.status(200).json({
-      success: true,
-      token: accessToken, // This is the short-lived access token
-    });
+    sendTokenResponse(user, 200, res);
   } catch (err) {
     next(err);
   }
@@ -193,18 +208,7 @@ export const googleLogin = async (
       }
     }
 
-    // At this point, we have a user. Let's sign a token for them.
-    const appToken = user.getSignedToken();
-    const options = {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-    };
-
-    res
-      .status(200)
-      .cookie("token", appToken, options)
-      .json({ success: true, token: appToken });
+    sendTokenResponse(user, 200, res);
   } catch (err) {
     next(err);
   }
@@ -301,21 +305,7 @@ export const verifyEmail = async (
     user.isVerified = true;
     user.verificationToken = undefined;
     user.verificationTokenExpire = undefined;
-    await user.save();
-
-    // 4. Log the user in by sending a token
-    const token = user.getSignedToken();
-    const options = {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-    };
-
-    res.status(200).cookie("token", token, options).json({
-      success: true,
-      message: "Email verified successfully.",
-      token,
-    });
+    sendTokenResponse(user, 200, res);
   } catch (err) {
     next(err);
   }
@@ -430,5 +420,70 @@ export const resetPassword = async (
   } catch (err) {
     logger.error("Reset password error:", err);
     next(err);
+  }
+};
+
+// @desc    Log user out / clear cookie
+// @route   POST /api/v1/auth/logout
+// @access  Public
+export const logout = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const tokenFromCookie = req.cookies.refreshToken;
+
+    // We must clear the cookie on the response regardless of what happens next
+    const refreshOptions = {
+      expires: new Date(0), // Set to a past date to expire immediately
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite:
+        process.env.NODE_ENV === "production"
+          ? "none"
+          : ("lax" as "lax" | "none"),
+    };
+    res.cookie("refreshToken", "", refreshOptions);
+
+    // If there's no token in the cookie, the user is already logged out.
+    // We can just send a success response.
+    if (!tokenFromCookie) {
+      res.status(200).json({ success: true, data: "Logged out successfully" });
+      return;
+    }
+
+    // Since you store a HASHED token, we must find the user the same way
+    // your refreshToken controller does: by looping and comparing.
+    // Note: This is not highly performant for millions of users, but is secure.
+    const usersWithToken = await User.find({
+      refreshToken: { $exists: true, $ne: null },
+    }).select("+refreshToken");
+
+    let foundUser: IUser | null = null;
+    for (const user of usersWithToken) {
+      if (
+        user.refreshToken &&
+        (await bcrypt.compare(tokenFromCookie, user.refreshToken))
+      ) {
+        foundUser = user;
+        break;
+      }
+    }
+
+    // If we found the user, invalidate their token in the database
+    if (foundUser) {
+      foundUser.refreshToken = undefined;
+      await foundUser.save({ validateBeforeSave: false });
+    }
+
+    // Send the final success response. The cookie was already cleared.
+    res.status(200).json({ success: true, data: "Logged out successfully" });
+  } catch (err) {
+    // Even if there's a DB error, we still want to proceed as if logged out.
+    // The cookie has been cleared, which is the most important client-side action.
+    logger.error("Error during logout:", err);
+    // Send a success response to not block the frontend flow.
+    res.status(200).json({ success: true, data: "Logout completed" });
   }
 };
