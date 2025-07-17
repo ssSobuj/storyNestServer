@@ -52,4 +52,15 @@ CommentSchema.post<IComment>("save", async function () {
   await StoryModel.recalculateAvgRating(this.story.toString());
 });
 
+// Add this middleware to decrement the count when a comment is deleted
+CommentSchema.post<IComment>(
+  "deleteOne",
+  { document: true, query: false },
+  async function () {
+    const storyId = this.story;
+    const Story = mongoose.model<IStory>("Story");
+    await Story.findByIdAndUpdate(storyId, { $inc: { commentCount: -1 } });
+  }
+);
+
 export default mongoose.model<IComment>("Comment", CommentSchema);

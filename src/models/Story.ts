@@ -24,6 +24,7 @@ export interface IStory extends Document {
   createdAt: Date;
   updatedAt: Date;
   comments: IComment[];
+  commentCount: number;
 }
 
 interface StoryModel extends Model<IStory> {
@@ -90,6 +91,10 @@ const StorySchema = new Schema<IStory, StoryModel>(
       max: [5, "Rating cannot be more than 5"],
     },
     views: {
+      type: Number,
+      default: 0,
+    },
+    commentCount: {
       type: Number,
       default: 0,
     },

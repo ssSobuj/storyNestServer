@@ -63,6 +63,9 @@ export const addComment = async (
     }
 
     const comment = await Comment.create(req.body);
+    await Story.findByIdAndUpdate(req.params.storyId, {
+      $inc: { commentCount: 1 },
+    });
 
     res.status(201).json({ success: true, data: comment });
   } catch (err) {
