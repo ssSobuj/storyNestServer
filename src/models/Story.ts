@@ -132,11 +132,8 @@ StorySchema.pre("deleteOne", { document: true }, async function (next) {
 
 StorySchema.statics.recalculateAvgRating = async function (storyId: string) {
   try {
-    // FIX: Instead of `this.model("Comment")`, we use the imported `Comment` model directly.
-    // This is cleaner and avoids any ambiguity with `this`.
     const stats = await Comment.aggregate([
       {
-        // Use `new Types.ObjectId(storyId)` to ensure it's a valid ObjectId for matching
         $match: { story: new Types.ObjectId(storyId) },
       },
       {
@@ -147,10 +144,11 @@ StorySchema.statics.recalculateAvgRating = async function (storyId: string) {
       },
     ]);
 
-    // `this` here refers to the StoryModel, so `this.findByIdAndUpdate` is correct.
     if (stats.length > 0) {
+      const roundedRating = Math.round(stats[0].avgRating * 10) / 10;
+
       await this.findByIdAndUpdate(storyId, {
-        avgRating: parseFloat(stats[0].avgRating.toFixed(1)),
+        avgRating: roundedRating,
       });
     } else {
       await this.findByIdAndUpdate(storyId, { avgRating: 0 });

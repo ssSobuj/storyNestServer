@@ -53,15 +53,27 @@ export const getStories = async (
     Object.assign(filter, JSON.parse(queryStr));
 
     // 2. Build the options object
+    // 2. Build the options object
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
-    const sort =
-      typeof req.query.sort === "string"
-        ? req.query.sort.split(",").join(" ")
-        : "-createdAt";
 
-    // ==> THE FIX: Handle projection (select) separately <==
+    // ==> THIS IS THE ONLY PART THAT CHANGES <==
+    let sort: string;
+    const sortQuery = req.query.sort as string;
+
+    if (sortQuery === "top-rated") {
+      // If the client asks for 'top-rated', we sort by avgRating in descending order.
+      sort = "-avgRating";
+    } else if (sortQuery) {
+      // For any other sort query (e.g., 'createdAt', '-views'), we use it directly.
+      sort = sortQuery.split(",").join(" ");
+    } else {
+      // Default sort is by the newest created.
+      sort = "-createdAt";
+    }
+    // ==> END OF THE CHANGE <==
+
     const projection =
       typeof req.query.fields === "string"
         ? req.query.fields.split(",").join(" ")
