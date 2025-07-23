@@ -331,6 +331,31 @@ export const getMe = async (
   }
 };
 
+/**
+ * @desc    Get all users
+ * @route   GET /api/v1/auth/users
+ * @access  Private/Admin
+ */
+export const getAllUsers = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const users = await User.find({});
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users,
+    });
+  } catch (err) {
+    // Log the error for debugging purposes
+    logger.error("Failed to get all users:", err);
+    // Pass the error to the next middleware
+    next(err);
+  }
+};
+
 // @desc    Forgot password
 // @route   POST /api/v1/auth/forgotpassword
 // @access  Public

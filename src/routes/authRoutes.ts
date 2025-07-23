@@ -9,8 +9,9 @@ import {
   googleLogin,
   refreshToken,
   logout,
+  getAllUsers,
 } from "../controllers/authController";
-import { protect } from "../middleware/auth";
+import { authorize, protect } from "../middleware/auth";
 import { check } from "express-validator";
 
 const router = Router();
@@ -44,5 +45,6 @@ router.post("/forgotpassword", forgotPassword);
 router.put("/resetpassword/:resettoken", resetPassword);
 router.post("/refresh", refreshToken); // <-- ADD THIS
 router.post("/logout", logout);
+router.get("/users", protect, authorize("admin"), getAllUsers);
 
 export default router;
