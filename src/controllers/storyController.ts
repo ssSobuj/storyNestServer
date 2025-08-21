@@ -5,6 +5,7 @@ import { cloudinary } from "../middleware/upload";
 import slugify from "slugify";
 import crypto from "crypto";
 import "../models/Comment";
+import User from "../models/User";
 
 // Define the interface for requests that have a user and potentially a file
 interface AuthRequest extends Request {
@@ -157,7 +158,6 @@ export const getStory = async (
   }
 };
 
-// ==> THE FIX: THIS IS THE NEW, ENHANCED FUNCTION <==
 // @desc    Get single story by its SLUG
 // @route   GET /api/v1/stories/slug/:slug
 // @access  Public
@@ -228,6 +228,10 @@ export const createStory = async (
 
     const storyData = { ...req.body, author: req.user.id, slug: slug };
 
+    if (req.user.role === "super-admin") {
+      storyData.status = StoryStatus.APPROVED;
+    }
+
     if (req.body.tags) {
       try {
         storyData.tags = JSON.parse(req.body.tags);
@@ -265,9 +269,18 @@ export const updateStory = async (
       res.status(403).json({ success: false, error: "User not authorized" });
       return;
     }
-    const updateData = { ...req.body, status: StoryStatus.PENDING };
 
-    // ==> THE FIX: Prevent the slug from being changed on update <==
+    const updateData: any = { ...req.body };
+
+    // Rule 1: If the person editing is NOT a super-admin, force re-approval.
+    // This means any edit by a 'user' or 'admin' sends the story back to the 'pending' queue.
+    if (req.user.role !== "super-admin") {
+      updateData.status = StoryStatus.PENDING;
+    }
+    // Rule 2: If the user IS a super-admin, we do NOT change the status. This allows them
+    // to edit an 'approved' story and have it remain 'approved'.
+
+    // Prevent the slug from being changed on any update.
     delete updateData.slug;
 
     if (req.file) {
@@ -302,10 +315,33 @@ export const deleteStory = async (
       res.status(404).json({ success: false, error: "Story not found" });
       return;
     }
-    if (story.author.toString() !== req.user.id && req.user.role !== "admin") {
-      res.status(403).json({ success: false, error: "Not authorized" });
+
+    let canDelete = false;
+
+    // Rule 1: Author can delete their own story
+    if (story.author.toString() === req.user.id) {
+      canDelete = true;
+    }
+    // Rule 4: Super admin can delete any story
+    else if (req.user.role === "super-admin") {
+      canDelete = true;
+    }
+    // Rule 2 & 3: Admin can delete a user's story, but not another admin's/super-admin's
+    else if (req.user.role === "admin") {
+      const author = await User.findById(story.author);
+      if (author && author.role === "user") {
+        canDelete = true;
+      }
+    }
+
+    if (!canDelete) {
+      res.status(403).json({
+        success: false,
+        error: "Not authorized to delete this story.",
+      });
       return;
     }
+
     if (story.coverImagePublicId) {
       await cloudinary.uploader.destroy(story.coverImagePublicId);
     }
@@ -330,16 +366,33 @@ export const updateStoryStatus = async (
       res.status(400).json({ success: false, error: "Invalid status value" });
       return;
     }
-    const story = await Story.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true, runValidators: true }
-    );
+
+    const story = await Story.findById(req.params.id);
+
     if (!story) {
       res.status(404).json({ success: false, error: "Story not found" });
       return;
     }
-    res.status(200).json({ success: true, data: story });
+
+    if (
+      req.user.role === "admin" &&
+      story.author.toString() === req.user.id &&
+      status === StoryStatus.APPROVED // <-- This is the new, crucial condition
+    ) {
+      res.status(403).json({
+        success: false,
+        error: "Admins are not authorized to approve their own stories.",
+      });
+      return;
+    }
+
+    const updatedStory = await Story.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({ success: true, data: updatedStory });
   } catch (err) {
     next(err);
   }

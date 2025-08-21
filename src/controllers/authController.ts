@@ -512,3 +512,128 @@ export const logout = async (
     res.status(200).json({ success: true, data: "Logout completed" });
   }
 };
+
+/**
+ * @desc    Promote user to admin
+ * @route   PUT /api/v1/auth/users/:id/promote
+ * @access  Private/SuperAdmin
+ */
+export const promoteToAdmin = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    if (user.role === "admin") {
+      res
+        .status(400)
+        .json({ success: false, error: "User is already an admin" });
+      return;
+    }
+
+    // The super-admin cannot be demoted, so we don't need to check for that here.
+
+    user.role = "admin";
+    await user.save();
+
+    res.status(200).json({ success: true, data: user });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Demote admin to user
+ * @route   PUT /api/v1/auth/users/:id/demote
+ * @access  Private/SuperAdmin
+ */
+export const demoteToUser = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    // A super-admin can never be demoted.
+    if (user.role === "super-admin") {
+      res
+        .status(403)
+        .json({ success: false, error: "Super admin cannot be demoted" });
+      return;
+    }
+
+    if (user.role !== "admin") {
+      res.status(400).json({ success: false, error: "User is not an admin" });
+      return;
+    }
+
+    user.role = "user";
+    await user.save();
+
+    res.status(200).json({ success: true, data: user });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Delete a user
+ * @route   DELETE /api/v1/auth/users/:id
+ * @access  Private/Admin or Private/SuperAdmin
+ */
+export const deleteUser = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userToDelete = await User.findById(req.params.id);
+
+    if (!userToDelete) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    // Rule: Nobody can delete a super-admin.
+    if (userToDelete.role === "super-admin") {
+      res
+        .status(403)
+        .json({ success: false, error: "Super admin cannot be deleted." });
+      return;
+    }
+
+    // Rule: Admins cannot delete other admins.
+    if (userToDelete.role === "admin" && req.user.role !== "super-admin") {
+      res
+        .status(403)
+        .json({
+          success: false,
+          error: "Admins are not authorized to remove other admins.",
+        });
+      return;
+    }
+
+    // If we reach here, the deletion is permitted.
+    // An admin can delete a user.
+    // A super-admin can delete a user or an admin.
+
+    await User.findByIdAndDelete(req.params.id);
+
+    res.status(200).json({ success: true, data: {} });
+  } catch (err) {
+    next(err);
+  }
+};

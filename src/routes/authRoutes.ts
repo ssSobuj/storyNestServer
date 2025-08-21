@@ -10,6 +10,9 @@ import {
   refreshToken,
   logout,
   getAllUsers,
+  promoteToAdmin,
+  demoteToUser,
+  deleteUser,
 } from "../controllers/authController";
 import { authorize, protect } from "../middleware/auth";
 import { check } from "express-validator";
@@ -46,5 +49,23 @@ router.put("/resetpassword/:resettoken", resetPassword);
 router.post("/refresh", refreshToken); // <-- ADD THIS
 router.post("/logout", logout);
 router.get("/users", protect, authorize("admin"), getAllUsers);
+
+// Only a 'super-admin' can promote a user to admin
+router.put(
+  "/users/:id/promote",
+  protect,
+  authorize("super-admin"),
+  promoteToAdmin
+);
+
+// Only a 'super-admin' can demote an admin to user
+router.put(
+  "/users/:id/demote",
+  protect,
+  authorize("super-admin"),
+  demoteToUser
+);
+
+router.delete("/users/:id", protect, authorize("admin"), deleteUser);
 
 export default router;

@@ -80,12 +80,31 @@ export const protect = async (
 };
 
 // Grant access to specific roles
+// export const authorize = (...roles: string[]) => {
+//   return (req: AuthRequest, res: Response, next: NextFunction) => {
+//     if (!req.user || !roles.includes(req.user.role)) {
+//       res.status(403).json({
+//         success: false,
+//         error: `User role ${req.user?.role} is not authorized`,
+//       });
+//       return;
+//     }
+//     next();
+//   };
+// };
+
 export const authorize = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
+    // If the user is a super-admin, they have universal access
+    if (req.user?.role === "super-admin") {
+      return next();
+    }
+
+    // Otherwise, check if the user's role is in the allowed roles list
     if (!req.user || !roles.includes(req.user.role)) {
       res.status(403).json({
         success: false,
-        error: `User role ${req.user?.role} is not authorized`,
+        error: `User role '${req.user?.role}' is not authorized to access this route`,
       });
       return;
     }

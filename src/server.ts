@@ -13,7 +13,8 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes";
 import storyRoutes from "./routes/storyRoutes";
 import commentRoutes from "./routes/commentRoutes"; // ==> IMPORT
-
+import seedSuperAdmin from "./utils/seedSuperAdmin"; // <== 1. IMPORT THE SEED SCRIPT
+import logger from "./utils/logger"; // <== (Optional but recommended) IMPORT YOUR LOGGER
 const app = express();
 // ==> A small but important change: Use process.env here <==
 const PORT = process.env.PORT || 5000;
@@ -49,12 +50,15 @@ const startServer = async () => {
     console.log("⏳ Attempting to connect to database...");
     await connectDB();
     console.log("✅ Database connected successfully.");
+    await seedSuperAdmin();
 
     app.listen(PORT, () => {
       console.log(`✅ Server running on http://localhost:${PORT}`);
     });
   } catch (err) {
-    console.error("❌ Fatal startup error:", err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger.error("❌ Fatal startup error:", errorMessage);
+
     process.exit(1);
   }
 };
