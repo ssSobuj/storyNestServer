@@ -17,6 +17,16 @@ const storage = new CloudinaryStorage({
   } as any,
 });
 
-const upload = multer({ storage: storage });
+const avatarStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "storynest_avatars", // <-- Use a different folder
+    allowedFormats: ["jpeg", "png", "jpg"],
+    transformation: [{ width: 200, height: 200, crop: "fill" }], // <-- Resize avatars to be square
+  } as any,
+});
 
-export { upload, cloudinary };
+const upload = multer({ storage: storage });
+const avatarUpload = multer({ storage: avatarStorage });
+
+export { upload, avatarUpload, cloudinary };

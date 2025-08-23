@@ -13,9 +13,14 @@ import {
   promoteToAdmin,
   demoteToUser,
   deleteUser,
+  updateDetails,
+  updatePassword,
+  updateAvatar,
+  setPassword,
 } from "../controllers/authController";
 import { authorize, protect } from "../middleware/auth";
 import { check } from "express-validator";
+import { avatarUpload } from "../middleware/upload";
 
 const router = Router();
 
@@ -67,5 +72,17 @@ router.put(
 );
 
 router.delete("/users/:id", protect, authorize("admin"), deleteUser);
+
+router.put("/updatedetails", protect, updateDetails);
+router.put("/updatepassword", protect, updatePassword);
+
+router.put(
+  "/updateavatar",
+  protect,
+  avatarUpload.single("avatar"), // Use your Cloudinary uploader middleware
+  updateAvatar
+);
+
+router.put("/setpassword", protect, setPassword);
 
 export default router;

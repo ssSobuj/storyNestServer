@@ -320,10 +320,30 @@ export const getMe = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const user = await User.findById(req.user.id);
+    // Select the password field to check for its existence
+    const user = await User.findById(req.user.id).select("+password");
+
+    if (!user) {
+      // This case should be rare due to the 'protect' middleware
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    // Create a safe user object to send to the client
+    const userResponse = {
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      googleId: user.googleId,
+      isVerified: user.isVerified,
+      passwordExists: !!user.password, // Convert to boolean: true if password string exists, false if undefined
+    };
+
     res.status(200).json({
       success: true,
-      data: user,
+      data: userResponse,
     });
   } catch (err) {
     logger.error("Get me error:", err);
@@ -352,6 +372,145 @@ export const getAllUsers = async (
     // Log the error for debugging purposes
     logger.error("Failed to get all users:", err);
     // Pass the error to the next middleware
+    next(err);
+  }
+};
+
+/**
+ * @desc    Update user details (currently only username)
+ * @route   PUT /api/v1/auth/updatedetails
+ * @access  Private
+ */
+export const updateDetails = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { username } = req.body;
+
+    // Build fields object. We explicitly DO NOT include email.
+    const fieldsToUpdate: { username?: string } = {};
+    if (username) {
+      fieldsToUpdate.username = username;
+    } else {
+      res.status(400).json({ success: false, error: "Username is required" });
+      return;
+    }
+
+    // Check if the new username is already taken by another user
+    const existingUser = await User.findOne({
+      username: fieldsToUpdate.username,
+      _id: { $ne: req.user.id },
+    });
+
+    // If a user is found with this query, it means someone ELSE already has that username.
+    if (existingUser) {
+      res
+        .status(400)
+        .json({ success: false, error: "Username is already taken" });
+      return;
+    }
+
+    const user = await User.findByIdAndUpdate(req.user.id, fieldsToUpdate, {
+      new: true, // Return the modified document
+      runValidators: true, // Run schema validators
+    });
+
+    res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Update user avatar
+ * @route   PUT /api/v1/auth/updateavatar
+ * @access  Private
+ */
+export const updateAvatar = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).json({ success: false, error: "Please upload a file" });
+      return;
+    }
+
+    // With multer-storage-cloudinary, req.file.path contains the full image URL
+    const avatarUrl = req.file.path;
+
+    user.avatar = avatarUrl;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      data: user, // Send back the updated user with the new avatar URL
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Update user password
+ * @route   PUT /api/v1/auth/updatepassword
+ * @access  Private
+ */
+export const updatePassword = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      res.status(400).json({
+        success: false,
+        error: "Please provide current and new passwords",
+      });
+      return;
+    }
+
+    // Find user and include the password field for comparison
+    const user = await User.findById(req.user.id).select("+password");
+
+    if (!user) {
+      // This should not happen if 'protect' middleware is working
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    // Check if current password matches
+    if (!(await user.matchPassword(currentPassword))) {
+      res
+        .status(401)
+        .json({ success: false, error: "Incorrect current password" });
+      return;
+    }
+
+    // Set new password (the pre-save hook in the User model will hash it)
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      data: "Password updated successfully",
+    });
+  } catch (err) {
     next(err);
   }
 };
@@ -617,12 +776,10 @@ export const deleteUser = async (
 
     // Rule: Admins cannot delete other admins.
     if (userToDelete.role === "admin" && req.user.role !== "super-admin") {
-      res
-        .status(403)
-        .json({
-          success: false,
-          error: "Admins are not authorized to remove other admins.",
-        });
+      res.status(403).json({
+        success: false,
+        error: "Admins are not authorized to remove other admins.",
+      });
       return;
     }
 
@@ -633,6 +790,57 @@ export const deleteUser = async (
     await User.findByIdAndDelete(req.params.id);
 
     res.status(200).json({ success: true, data: {} });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Set a password for a user who doesn't have one (e.g., Google sign-up)
+ * @route   PUT /api/v1/auth/setpassword
+ * @access  Private
+ */
+export const setPassword = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 8) {
+      res.status(400).json({
+        success: false,
+        error: "Please provide a password with at least 8 characters",
+      });
+      return;
+    }
+
+    const user = await User.findById(req.user.id).select("+password");
+
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    // This endpoint is only for users who DON'T have a password
+    if (user.password) {
+      res.status(400).json({
+        success: false,
+        error:
+          "Password already set. Please use the 'Change Password' feature.",
+      });
+      return;
+    }
+
+    // Set the new password. The pre-save hook in the User model will hash it.
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      data: "Password set successfully. You can now log in with your email and password.",
+    });
   } catch (err) {
     next(err);
   }

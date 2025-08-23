@@ -1,10 +1,12 @@
-import { Schema, model, Document } from "mongoose";
+import { Schema, model, Document, Types } from "mongoose"; // <-- CHANGE THIS LINE
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { signToken } from "../config/jwt";
 import logger from "../utils/logger";
 
 export interface IUser extends Document {
+  _id: Types.ObjectId; // <-- ADD THIS LINE
+  avatar?: string;
   username: string;
   email: string;
   password?: string;
@@ -46,6 +48,10 @@ const UserSchema = new Schema<IUser>(
       // required: [true, "Please add a password"],
       minlength: [8, "Password must be at least 8 characters"],
       select: false,
+    },
+    avatar: {
+      type: String,
+      default: "",
     },
     role: {
       type: String,
