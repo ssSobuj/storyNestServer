@@ -15,6 +15,7 @@ import storyRoutes from "./routes/storyRoutes";
 import commentRoutes from "./routes/commentRoutes"; // ==> IMPORT
 import seedSuperAdmin from "./utils/seedSuperAdmin"; // <== 1. IMPORT THE SEED SCRIPT
 import logger from "./utils/logger"; // <== (Optional but recommended) IMPORT YOUR LOGGER
+
 const app = express();
 // ==> A small but important change: Use process.env here <==
 const PORT = process.env.PORT || 5000;
@@ -49,7 +50,7 @@ const startServer = async () => {
   try {
     console.log("⏳ Attempting to connect to database...");
     await connectDB();
-    console.log("✅ Database connected successfully.");
+    console.log("✅ connected successfully.");
     await seedSuperAdmin();
 
     app.listen(PORT, () => {
