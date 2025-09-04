@@ -1,6 +1,7 @@
-import { Schema, model, Document, Types, Model } from "mongoose";
+import mongoose, { Schema, model, Document, Types, Model } from "mongoose";
 import { IComment } from "./Comment"; // Make sure the path is correct
 import Comment from "./Comment";
+import { ICategory } from "./Category";
 
 export enum StoryStatus {
   PENDING = "pending",
@@ -13,7 +14,7 @@ export interface IStory extends Document {
   content: string;
   slug: string;
   author: Types.ObjectId;
-  category: string;
+  category: Types.ObjectId | ICategory;
   tags: string[];
   status: StoryStatus;
   coverImage: string;
@@ -72,16 +73,15 @@ const StorySchema = new Schema<IStory, StoryModel>(
       default: 0,
     },
     category: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "Category",
       required: [true, "Please add a category"],
-      enum: [
-        "Fiction",
-        "Non-Fiction",
-        "Fantasy",
-        "Sci-Fi",
-        "Horror",
-        "Romance",
-      ],
+      validate: {
+        validator: function(value: any) {
+          return mongoose.Types.ObjectId.isValid(value);
+        },
+        message: 'Invalid category ID'
+      }
     },
     tags: [String],
     avgRating: {

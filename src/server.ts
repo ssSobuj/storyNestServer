@@ -4,6 +4,7 @@
 // Import and run this file first. This guarantees all .env variables
 // are loaded before any other module in your application tries to use them.
 import "./loadEnv";
+import { ErrorRequestHandler } from 'express';
 
 // All other imports can now safely run
 import express from "express";
@@ -13,8 +14,10 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes";
 import storyRoutes from "./routes/storyRoutes";
 import commentRoutes from "./routes/commentRoutes"; // ==> IMPORT
+import categoryRoutes from "./routes/categoryRoutes"; // ==> IMPORT
 import seedSuperAdmin from "./utils/seedSuperAdmin"; // <== 1. IMPORT THE SEED SCRIPT
-import logger from "./utils/logger"; // <== (Optional but recommended) IMPORT YOUR LOGGER
+import logger from "./utils/logger";
+
 
 const app = express();
 // ==> A small but important change: Use process.env here <==
@@ -33,6 +36,22 @@ const corsOptions = {
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 };
+
+const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
+  console.error("🚫 Unhandled API Error:", err.stack); // Log the full stack trace for debugging
+  const statusCode = err.statusCode || 500;
+
+  res.status(statusCode).json({
+    success: false,
+    error: err.message || 'Server Error',
+    // In a production environment, you might not want to send the stack trace to the client for security.
+    // For development/debugging, it's very useful.
+    // stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+};
+app.use(errorHandler);
+
+
 app.use(cors(corsOptions));
 
 // 2. Other Middleware
@@ -47,6 +66,7 @@ app.use("/api/v1/auth", authRoutes);
 // ==> A small typo fix: should probably be '/stories' to match REST conventions
 app.use("/api/v1/stories", storyRoutes);
 app.use("/api/v1/stories/:storyId/comments", commentRoutes);
+app.use('/api/v1/categories', categoryRoutes);
 
 // --- SERVER STARTUP LOGIC ---
 

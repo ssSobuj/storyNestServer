@@ -55,8 +55,8 @@ router
     [
       check("title", "Title is required").not().isEmpty(),
       check("content", "Content is required").not().isEmpty(),
-      check("category", "Category is required").not().isEmpty(),
-    ],
+      check("category", "Category is required").notEmpty(), 
+        ],
     async (req: Request, res: Response, next: NextFunction) => {
       // Invalidate cache before creating new story
       try {

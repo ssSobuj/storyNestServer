@@ -6,6 +6,8 @@ import slugify from "slugify";
 import crypto from "crypto";
 import "../models/Comment";
 import User from "../models/User";
+import Category from "../models/Category";
+import mongoose from "mongoose";
 
 // Define the interface for requests that have a user and potentially a file
 interface AuthRequest extends Request {
@@ -24,6 +26,9 @@ export const getStories = async (
   try {
     // 1. Build the filter object
     const filter: { [key: string]: any } = {};
+
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
 
     if (req.user?.role !== "admin") {
       filter.status = StoryStatus.APPROVED;
@@ -46,18 +51,44 @@ export const getStories = async (
       filter.status = queryObj.status; // Allow admin to filter by any status
     }
 
-    const excludedFields = ["page", "sort", "limit", "fields", "search"];
+    const excludedFields = ["page", "sort", "limit", "fields", "search","category"];
+
     excludedFields.forEach((el) => delete queryObj[el]);
 
-    let queryStr = JSON.stringify(queryObj);
-    queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g, (match) => `$${match}`);
-    Object.assign(filter, JSON.parse(queryStr));
+     // --- HANDLE CATEGORY FILTERING EXPLICITLY ---
+     if (req.query.category && typeof req.query.category === 'string') {
+      const categoryIdentifier = req.query.category;
+      
+      // Try to find category by ID or slug
+      const foundCategory = await Category.findOne({
+        $or: [
+          { _id: categoryIdentifier }, // This will only work if it's a valid ObjectId
+          { slug: categoryIdentifier.toLowerCase() }
+        ]
+      });
+    
+      if (foundCategory) {
+        filter.category = foundCategory._id;
+      } else {
+        // If category not found, return empty results
+        res.status(200).json({ 
+          success: true, 
+          count: 0, 
+          pagination: { totalPages: 0, currentPage: page }, 
+          data: [] 
+        });
+        return;
+      }
+    }
 
-    // 2. Build the options object
-    // 2. Build the options object
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+  // --- END CATEGORY HANDLING ---
+
+
     const skip = (page - 1) * limit;
+
+
+    
+
 
     // ==> THIS IS THE ONLY PART THAT CHANGES <==
     let sort: string;
@@ -83,6 +114,7 @@ export const getStories = async (
     // 3. Execute the query with all parts
     const stories = await Story.find(filter)
       .populate({ path: "author", select: "username" })
+      .populate({ path: "category", select: "name slug" }) 
       .sort(sort)
       .skip(skip)
       .limit(limit)
@@ -114,7 +146,9 @@ export const getMyStories = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const stories = await Story.find({ author: req.user.id }).sort(
+    const stories = await Story.find({ author: req.user.id })
+    .populate({ path: "category", select: "name slug" })
+    .sort(
       "-createdAt"
     );
     res
@@ -137,6 +171,7 @@ export const getStory = async (
     const storyId = req.params.id;
     const story = await Story.findById(storyId)
       .populate({ path: "author", select: "username" })
+      .populate({ path: "category", select: "name slug" }) 
       .populate("comments");
 
     const canView =
@@ -172,6 +207,7 @@ export const getStoryBySlug = async (
     // Find the story by its unique slug
     const story = await Story.findOne({ slug: slug })
       .populate({ path: "author", select: "username" })
+      .populate({ path: "category", select: "name slug" }) 
       .populate("comments"); // Also populate comments for consistency
 
     // Check if the story exists and if the user has permission to view it
@@ -211,6 +247,32 @@ export const createStory = async (
     }
     const { title } = req.body;
 
+    // === CATEGORY HANDLING ===
+    if (req.body.category) {
+      if (mongoose.Types.ObjectId.isValid(req.body.category)) {
+        const existingCategory = await Category.findById(req.body.category);
+        if (!existingCategory) {
+          res.status(400).json({ success: false, error: 'Invalid category ID provided.' });
+          return;
+        }
+      } else {
+        const foundCategory = await Category.findOne({
+          $or: [
+            { name: req.body.category },
+            { slug: slugify(req.body.category, { lower: true }) }
+          ]
+        });
+        
+        if (!foundCategory) {
+          res.status(400).json({ success: false, error: 'Category not found.' });
+          return;
+        }
+        
+        req.body.category = foundCategory._id;
+      }
+    }
+    // === END CATEGORY HANDLING ===
+
     let slug = slugify(title, {
       lower: true,
       trim: true,
@@ -226,7 +288,11 @@ export const createStory = async (
       slug = `${slug}-${randomSuffix}`;
     }
 
-    const storyData = { ...req.body, author: req.user.id, slug: slug };
+    const storyData = { 
+      ...req.body, 
+      author: req.user.id, 
+      slug: slug
+    };
 
     if (req.user.role === "super-admin") {
       storyData.status = StoryStatus.APPROVED;
@@ -272,15 +338,36 @@ export const updateStory = async (
 
     const updateData: any = { ...req.body };
 
-    // Rule 1: If the person editing is NOT a super-admin, force re-approval.
-    // This means any edit by a 'user' or 'admin' sends the story back to the 'pending' queue.
+    // === CATEGORY HANDLING ===
+    if (updateData.category) {
+      if (mongoose.Types.ObjectId.isValid(updateData.category)) {
+        const existingCategory = await Category.findById(updateData.category);
+        if (!existingCategory) {
+          res.status(400).json({ success: false, error: 'Invalid category ID provided.' });
+          return;
+        }
+      } else {
+        const foundCategory = await Category.findOne({
+          $or: [
+            { name: updateData.category },
+            { slug: slugify(updateData.category, { lower: true }) }
+          ]
+        });
+        
+        if (!foundCategory) {
+          res.status(400).json({ success: false, error: 'Category not found.' });
+          return;
+        }
+        
+        updateData.category = foundCategory._id;
+      }
+    }
+    // === END CATEGORY HANDLING ===
+
     if (req.user.role !== "super-admin") {
       updateData.status = StoryStatus.PENDING;
     }
-    // Rule 2: If the user IS a super-admin, we do NOT change the status. This allows them
-    // to edit an 'approved' story and have it remain 'approved'.
 
-    // Prevent the slug from being changed on any update.
     delete updateData.slug;
 
     if (req.file) {
