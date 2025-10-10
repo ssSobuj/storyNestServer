@@ -33,7 +33,7 @@ export const getCommentsForStory = async (
 ): Promise<void> => {
   try {
     const comments = await Comment.find({ story: req.params.storyId })
-      .populate({ path: "author", select: "username profilePicture" })
+      .populate({ path: "author", select: "username avatar" })
       .sort("-createdAt");
 
     res
