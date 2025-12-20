@@ -1,8 +1,4 @@
 # Environment variables
-.env
-.env.local
-.env.development
-.env.production
 
 # Dependency directories
 node_modules/
@@ -52,3 +48,4 @@ cypress/screenshots/
 *.dump
 *.env.backup
 .vercel
+config.bat
